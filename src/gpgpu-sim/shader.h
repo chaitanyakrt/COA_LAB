@@ -315,7 +315,8 @@ enum scheduler_prioritization_type {
 // Each of these corresponds to a string value in the gpgpsim.config file
 // For example - to specify the LRR scheudler the config must contain lrr
 enum concrete_scheduler {
-  CONCRETE_SCHEDULER_LRR = 0,
+  CONCRETE_SCHEDULER_KAWS = 0,
+  CONCRETE_SCHEDULER_LRR,
   CONCRETE_SCHEDULER_GTO,
   CONCRETE_SCHEDULER_TWO_LEVEL_ACTIVE,
   CONCRETE_SCHEDULER_WARP_LIMITING,
@@ -386,6 +387,7 @@ class scheduler_unit {  // this can be copied freely, so can be used in std
       unsigned num_warps_to_add, OrderingType age_ordering,
       bool (*priority_func)(U lhs, U rhs));
   static bool sort_warps_by_oldest_dynamic_id(shd_warp_t *lhs, shd_warp_t *rhs);
+  static bool sort_warps_by_progress_dynamic_id(shd_warp_t *lhs, shd_warp_t *rhs);
 
   // Derived classes can override this function to populate
   // m_supervised_warps with their scheduling policies
@@ -449,6 +451,26 @@ class lrr_scheduler : public scheduler_unit {
     m_last_supervised_issued = m_supervised_warps.end();
   }
 };
+
+class kaws_scheduler : public scheduler_unit {
+ public:
+  kaws_scheduler(shader_core_stats *stats, shader_core_ctx *shader,
+                Scoreboard *scoreboard, simt_stack **simt,
+                std::vector<shd_warp_t *> *warp, register_set *sp_out,
+                register_set *dp_out, register_set *sfu_out,
+                register_set *int_out, register_set *tensor_core_out,
+                std::vector<register_set *> &spec_cores_out,
+                register_set *mem_out, int id)
+      : scheduler_unit(stats, shader, scoreboard, simt, warp, sp_out, dp_out,
+                       sfu_out, int_out, tensor_core_out, spec_cores_out,
+                       mem_out, id) {}
+  virtual ~kaws_scheduler() {}
+  virtual void order_warps();
+  virtual void done_adding_supervised_warps() {
+    m_last_supervised_issued = m_supervised_warps.begin();
+  }
+};
+
 
 class gto_scheduler : public scheduler_unit {
  public:
@@ -2198,6 +2220,7 @@ class shader_core_ctx : public core_t {
   unsigned m_n_active_cta;  // number of Cooperative Thread Arrays (blocks)
                             // currently running on this shader.
   unsigned m_cta_status[MAX_CTA_PER_SHADER];  // CTAs status
+  unsigned m_cta_progress[MAX_CTA_PER_SHADER]; //CTAs progress
   unsigned m_not_completed;  // number of threads to be completed (==0 when all
                              // thread on this core completed)
   std::bitset<MAX_THREAD_PER_SM> m_active_threads;
