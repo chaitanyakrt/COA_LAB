@@ -1,3 +1,21 @@
+# MID_SEM PROJECT
+
+## GPU bottleneck analysis
+
+1. Modified the GPGPU-Sim source code to introduce the counters which capture the state of the warp. State of warp ={waiting , Issued, XALU, XMEM, Other}
+
+2. The main changes like introducing the counters and printing the results were done in the code shader.cc in the folder src/gpgpu-sim
+
+3. Issued state - Warps that issue an instruction to the execution pipeline are accounted here.
+   Waiting state - Warps waiting for an instruction to commit so that further dependent instructions can be issued to the pipeline are in this category.
+   Excess ALU (XALU) state - Warps that are ready for execution of arithmetic operations, but cannot execute due to unavailability of resources are in this category. 
+   Excess MEM (XMEM) state - Warps that are ready to send an instruction to the Load/Store pipeline but are restricted are accounted here.
+   Other state - Warps waiting on a synchronization instruction or warps that do not have their instructions in the instruction buffer.
+   
+4. The changes were done in the scheduler_unit::cycle() portion of the code where the warps were issued by the scheduler based on the ibuffer and other parameters.
+
+5. Reference - https://cccp.eecs.umich.edu/papers/asethia-micro14.pdf
+
 Welcome to GPGPU-Sim, a cycle-level simulator modeling contemporary graphics
 processing units (GPUs) running GPU computing workloads written in CUDA or
 OpenCL. Also included in GPGPU-Sim is a performance visualization tool called
@@ -496,22 +514,5 @@ To debug failing GPGPU-Sim regression tests you need to run them locally.  The f
 	```
 	This will put you in at the (gdb) prompt.  Setup any breakpoints needed and run.  
 	
-# MID_SEM PROJECT
-
-## GPU bottleneck analysis
-
-1. Modified the GPGPU-Sim source code to introduce the counters which capture the state of the warp. State of warp ={waiting , Issued, XALU, XMEM, Other}
-
-2. The main changes like introducing the counters and printing the results were done in the code shader.cc in the folder src/gpgpu-sim
-
-3. Issued state - Warps that issue an instruction to the execution pipeline are accounted here.
-   Waiting state - Warps waiting for an instruction to commit so that further dependent instructions can be issued to the pipeline are in this category.
-   Excess ALU (XALU) state - Warps that are ready for execution of arithmetic operations, but cannot execute due to unavailability of resources are in this category. 
-   Excess MEM (XMEM) state - Warps that are ready to send an instruction to the Load/Store pipeline but are restricted are accounted here.
-   Other state - Warps waiting on a synchronization instruction or warps that do not have their instructions in the instruction buffer.
-   
-4. The changes were done in the scheduler_unit::cycle() portion of the code where the warps were issued by the scheduler based on the ibuffer and other parameters.
-
-5. Reference - https://cccp.eecs.umich.edu/papers/asethia-micro14.pdf
 
 
