@@ -1127,6 +1127,13 @@ void scheduler_unit::order_by_priority(
   }
 }
 
+unsigned int other_count = 0;
+unsigned int xmem_count  = 0;
+unsigned int iss_count   = 0;
+unsigned int wait_count  = 0;
+unsigned int xalu_count = 0;
+unsigned int warp_count = 0;
+
 void scheduler_unit::cycle() {
   SCHED_DPRINTF("scheduler_unit::cycle()\n");
   bool valid_inst =
@@ -1136,48 +1143,62 @@ void scheduler_unit::cycle() {
                              // waiting for pending register writes
   bool issued_inst = false;  // of these we issued one
 
+
   order_warps();
+  warp_count+=m_next_cycle_prioritized_warps.size();
+
+
   for (std::vector<shd_warp_t *>::const_iterator iter =
            m_next_cycle_prioritized_warps.begin();
        iter != m_next_cycle_prioritized_warps.end(); iter++) {
     // Don't consider warps that are not yet valid
-    if ((*iter) == NULL || (*iter)->done_exit()) {
+    if ((*iter) == NULL) {
+      other_count++;
       continue;
     }
+    else if ((*iter)->done_exit()) {
+      warp_count--;
+      continue;
+    }
+
     SCHED_DPRINTF("Testing (warp_id %u, dynamic_warp_id %u)\n",
                   (*iter)->get_warp_id(), (*iter)->get_dynamic_warp_id());
+    
+
     unsigned warp_id = (*iter)->get_warp_id();
     unsigned checked = 0;
     unsigned issued = 0;
+
     exec_unit_type_t previous_issued_inst_exec_type = exec_unit_type_t::NONE;
     unsigned max_issue = m_shader->m_config->gpgpu_max_insn_issue_per_warp;
     bool diff_exec_units =
         m_shader->m_config
-            ->gpgpu_dual_issue_diff_exec_units;  // In tis mode, we only allow
+            ->gpgpu_dual_issue_diff_exec_units;  // In this mode, we only allow
                                                  // dual issue to diff execution
                                                  // units (as in Maxwell and
                                                  // Pascal)
 
-    if (warp(warp_id).ibuffer_empty())
+    if (warp(warp_id).ibuffer_empty() || warp(warp_id).waiting()){
+      other_count++;
       SCHED_DPRINTF(
           "Warp (warp_id %u, dynamic_warp_id %u) fails as ibuffer_empty\n",
           (*iter)->get_warp_id(), (*iter)->get_dynamic_warp_id());
 
-    if (warp(warp_id).waiting())
       SCHED_DPRINTF(
           "Warp (warp_id %u, dynamic_warp_id %u) fails as waiting for "
           "barrier\n",
           (*iter)->get_warp_id(), (*iter)->get_dynamic_warp_id());
+      }
 
-    while (!warp(warp_id).waiting() && !warp(warp_id).ibuffer_empty() &&
+    while(!warp(warp_id).waiting() && !warp(warp_id).ibuffer_empty() &&
            (checked < max_issue) && (checked <= issued) &&
            (issued < max_issue)) {
       const warp_inst_t *pI = warp(warp_id).ibuffer_next_inst();
       // Jin: handle cdp latency;
-      if (pI && pI->m_is_cdp && warp(warp_id).m_cdp_latency > 0) {
+      if (pI && pI->m_is_cdp && warp(warp_id).m_cdp_latency > 0){
         assert(warp(warp_id).m_cdp_dummy);
-        warp(warp_id).m_cdp_latency--;
-        break;
+        warp(warp_id).m_cdp_latency--;                   //these lines from 1187-1191 are not 
+        break;                                           //covered for us.
       }
 
       bool valid = warp(warp_id).ibuffer_next_valid();
@@ -1197,6 +1218,7 @@ void scheduler_unit::cycle() {
               "instruction flush\n",
               (*iter)->get_warp_id(), (*iter)->get_dynamic_warp_id());
           // control hazard
+          wait_count++;
           warp(warp_id).set_next_pc(pc);
           warp(warp_id).ibuffer_flush();
         } else {
@@ -1208,9 +1230,9 @@ void scheduler_unit::cycle() {
             ready_inst = true;
 
             const active_mask_t &active_mask =
-                m_shader->get_active_mask(warp_id, pI);
+                m_shader->get_active_mask(warp_id, pI);       //not known for now.
 
-            assert(warp(warp_id).inst_in_pipeline());
+            assert(warp(warp_id).inst_in_pipeline());         //not known for now.
 
             if ((pI->op == LOAD_OP) || (pI->op == STORE_OP) ||
                 (pI->op == MEMORY_BARRIER_OP) ||
@@ -1227,6 +1249,12 @@ void scheduler_unit::cycle() {
                 warp_inst_issued = true;
                 previous_issued_inst_exec_type = exec_unit_type_t::MEM;
               }
+
+              else{
+                  xmem_count++;
+              }
+
+
             } else {
               bool sp_pipe_avail =
                   (m_shader->m_config->gpgpu_num_sp_units > 0) &&
@@ -1307,6 +1335,10 @@ void scheduler_unit::cycle() {
                   warp_inst_issued = true;
                   previous_issued_inst_exec_type = exec_unit_type_t::INT;
                 }
+                else{
+                  xalu_count++;
+                }
+
               } else if ((m_shader->m_config->gpgpu_num_dp_units > 0) &&
                          (pI->op == DP_OP) &&
                          !(diff_exec_units && previous_issued_inst_exec_type ==
@@ -1319,6 +1351,11 @@ void scheduler_unit::cycle() {
                   warp_inst_issued = true;
                   previous_issued_inst_exec_type = exec_unit_type_t::DP;
                 }
+
+                else{
+                  xalu_count++;
+                }
+
               }  // If the DP units = 0 (like in Fermi archi), then execute DP
                  // inst on SFU unit
               else if (((m_shader->m_config->gpgpu_num_dp_units == 0 &&
@@ -1334,6 +1371,11 @@ void scheduler_unit::cycle() {
                   warp_inst_issued = true;
                   previous_issued_inst_exec_type = exec_unit_type_t::SFU;
                 }
+
+                else{
+                  xalu_count++;
+                }
+
               } else if ((pI->op == TENSOR_CORE_OP) &&
                          !(diff_exec_units && previous_issued_inst_exec_type ==
                                                   exec_unit_type_t::TENSOR)) {
@@ -1345,6 +1387,11 @@ void scheduler_unit::cycle() {
                   warp_inst_issued = true;
                   previous_issued_inst_exec_type = exec_unit_type_t::TENSOR;
                 }
+
+                else{
+                  xalu_count++;
+                }
+
               } else if ((pI->op >= SPEC_UNIT_START_ID) &&
                          !(diff_exec_units &&
                            previous_issued_inst_exec_type ==
@@ -1367,6 +1414,11 @@ void scheduler_unit::cycle() {
                   previous_issued_inst_exec_type =
                       exec_unit_type_t::SPECIALIZED;
                 }
+
+                else{
+                  xalu_count++;
+                }
+
               }
 
             }  // end of else
@@ -1374,6 +1426,8 @@ void scheduler_unit::cycle() {
             SCHED_DPRINTF(
                 "Warp (warp_id %u, dynamic_warp_id %u) fails scoreboard\n",
                 (*iter)->get_warp_id(), (*iter)->get_dynamic_warp_id());
+
+              wait_count++;
           }
         }
       } else if (valid) {
@@ -1394,6 +1448,7 @@ void scheduler_unit::cycle() {
       checked++;
     }
     if (issued) {
+       iss_count+=issued;
       // This might be a bit inefficient, but we need to maintain
       // two ordered list for proper scheduler execution.
       // We could remove the need for this loop by associating a
@@ -1415,6 +1470,21 @@ void scheduler_unit::cycle() {
       else
         abort();  // issued should be > 0
 
+      iter++;
+      for(;iter!=m_next_cycle_prioritized_warps.end();iter++){
+        if((*iter)==NULL){
+          other_count++;
+          continue;
+        }
+        else if((*iter)->done_exit()){
+          warp_count--;
+          continue;
+        }
+        else {
+          wait_count++;
+        }
+      }
+
       break;
     }
   }
@@ -1427,6 +1497,17 @@ void scheduler_unit::cycle() {
                                         // to memory)
   else if (!issued_inst)
     m_stats->shader_cycle_distro[2]++;  // pipeline stalled
+
+
+  
+  fprintf(stderr,"state breakdown of warps till this cycle:\n");
+  fprintf(stderr,"1.total warps in waiting state are: %u\n",wait_count);
+  fprintf(stderr,"2.total warps in issued state are: %u\n",iss_count);
+  fprintf(stderr,"3.total warps in xalu state are: %u\n",xalu_count);
+  fprintf(stderr,"4.total warps in xmem state are: %u\n",xmem_count);
+  fprintf(stderr,"5.total warps in others state are: %u\n",other_count);
+  fprintf(stderr,"total warps are: %u\n",warp_count); 
+  fprintf(stderr, "expected total warps are: %u\n",other_count+wait_count+xmem_count+xalu_count+iss_count);
 }
 
 void scheduler_unit::do_on_warp_issued(
