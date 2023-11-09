@@ -16,6 +16,8 @@
 
 5. Reference - https://cccp.eecs.umich.edu/papers/asethia-micro14.pdf
 
+#INTRODUCTION TO GPGPU-SIM
+
 Welcome to GPGPU-Sim, a cycle-level simulator modeling contemporary graphics
 processing units (GPUs) running GPU computing workloads written in CUDA or
 OpenCL. Also included in GPGPU-Sim is a performance visualization tool called
