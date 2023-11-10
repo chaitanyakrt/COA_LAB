@@ -1,3 +1,46 @@
+# END_SEM PROJECT
+
+## KERNEL AWARE WARP SCHEDULER
+
+1. The present warp scheduling strategies undergo resource underutilization, during different kernel execution periods. Resource underutilization occurs when the number of running CTAs in the SM is less than the maximum number of CTAs that the SM can handle. Thus, the key to the prevention of resource underutilization is to maximize the utilization of the SM by allocating the maximum number of CTAs to it.
+
+2. To implement this scheduling policy in software of the gpgpu-sim, we need to introuce a new scheduler code which takes care of the order_warps(), function to sort the warps according to the new scheduling policy.
+
+3. The new scheduling policy will be based on the last cta issued to the kernel, which can be taken care by calling the function no_more_ctas_to_run() in kernel_info_t class. Until the last cta is issued, the scheduler works in age based way after which the scheduler works in progress based way.
+
+4. The new introduced scheduling class is called kaws_scheduler which can be updated by changing the create_scheduler function in shader.cc. We need to change the config file also to change the scheduling policy to kaws.
+
+5. Age based scheduling is already present in the code as oldest_scheduler. To introduce the progress based scheduling we initilize a counter which counts the progress (number of instructions issued to the resprective warp of cta) of each cta. m_cta_progress[MAX_CTA_PER_SHADER] is created in shader_core_ctx class.
+
+6. To initialize the progress of each cta as 0 at the time of issuing cta to the core, is updated in shader_core_ctx::issue_block2core() function in gpu_sim.cc. The current issued cta id is stored in the variable free_cta_hw_id.
+
+7. To increment the progress counter of cta, in scheduler_unit::cycle() function in the section if(warp_inst_issued), we update the progress counter of cta by 1.
+
+8. To sort the warps as per the age or progress, the comparator in order_by_priority() funtion which is sort_warps_by_oldest_id in age based way and sort_warps_by_progress_id in progress based way.
+
+## WARP SHARING MECHANISM
+
+1. To implement this, the motivation is that a warp scheduler cannot issue new warp instructions if the OCU, which is supposed to load operands corresponding to that specific warp instruction, is unavailable. Owing to the multiple-warp-scheduler configuration, OCUs from different warp schedulers are likely to be available. Our concept is to utilize these to maintain the pipeline and prevent pipeline stall.
+
+2. When an instrunction is issued in scheduler_unit::cycle() function, according to its instruction type we check the availability of respective register files to issue them. The checking of availabilty is done using function has_free() and register files are issued using get_free() function in abstract_hardware_model.h
+
+3. To check the available register files of the different scheduler units, we introduce a new counter scheduler_id for respective register type. To get the id of free scheduler unit we run a loop on every register file of the respective instruction. 
+
+4. While iteration of the loop, if (register is available) we update the scheduler_id as the id of register file. This updated scheduler_id is used while issuing the warp to respective instruciton.
+
+## EVALUATION 
+
+1. We have used the applications "pathfinder", "hotspot" and "3MM" from the benchmarks gpu-rodinia and gpu-polybench respectively.
+
+2. We compared the performance of these applications using kaws and lrr schedulers along with and without warp sharing mechanism. To evaluate the results we considered the parameters gpu_tot_sim_cycles and gpu_tot_ipc of the last kernel.
+
+3. As per our prediction, kaws outperformed the lrr in all three applications with and without warp sharing.
+
+These are the results we obtained after running the above mentioned applications.
+
+![enD](https://github.com/chaitanyakrt/COA_LAB/assets/121499857/0acf5aa4-b07b-4ff5-8923-dce753b9f81d)
+
+
 # MID_SEM PROJECT
 
 ## GPU bottleneck analysis
